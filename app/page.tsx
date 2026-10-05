@@ -1,8 +1,24 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 
-const referenceImage = 'https://hebbkx1anhila5yf.public.blob.vercel-storage.com/ChatGPT%20Image%20Aug%2010%2C%202026%2C%2002_28_20%20AM-4QMx1X8BWmrkwNCkpfNgsZ8M3KVzLY.png'
+// ---- Kontakti (ndrysho vetëm këtu) ----
+const CONTACT = {
+  email: 'muranova071@gmail.com',
+  phoneDisplay: '046 444 002',
+  phoneHref: 'tel:+38346444002',
+  office: {
+    name: 'Zyra',
+    address: 'Objekti 1, afër Pronex Group SHPK, Prishtinë',
+    mapUrl: 'https://www.google.com/maps/place/Pronex+Group+SHPK/@42.6568599,21.1777408,36m/data=!3m1!1e3!4m6!3m5!1s0x13549f5c1e1e18dd:0xc74d33b3134be094!8m2!3d42.6568285!4d21.1778393!16s%2Fg%2F11zgycg0k6',
+  },
+  workshop: {
+    name: 'Punishtja',
+    address: 'Rr. Eset Maloku, përballë shkollës «Hilmi Rakovica», Prishtinë',
+    // TODO: zëvendëso me linkun e saktë të Google Maps kur ta kesh
+    mapUrl: 'https://www.google.com/maps/place/MURANOVA+WoodWorks/@42.6886793,21.1539209,581m/data=!3m2!1e3!4b1!4m6!3m5!1s0x13549fe45fe893c9:0xfac3cb627341a022!8m2!3d42.6886754!4d21.1564958!16s%2Fg%2F11p1hvzphg?entry=ttu&g_ep=EgoyMDI2MDkzMC4wIKXMDSoASAFQAw%3D%3D',
+  },
+}
 
 const categories = ['Të gjitha', 'Kuzhina', 'Ormana', 'Koridori', 'TV & living', 'Tryeze pune', 'Dhoma gjumi', 'Garderoba']
 const categoryDescriptions: Record<string, string> = {
@@ -124,138 +140,305 @@ const featuredProducts = [
 function Logo({ className }: { className?: string }) {
   return (
     <a className={`logo ${className || ''}`} href="#top" aria-label="Muranova fillimi">
-      <img 
-        src="/muranova_logo_concept.png" 
-        alt="Muranova Woodworks Logo" 
-        style={{ height: '100px', width: 'auto', display: 'block' }} 
-      />
+      <img src="/muranova_logo_concept.png" alt="Muranova Woodworks Logo" />
     </a>
   )
 }
 
-
+const wrap = (i: number, n: number) => (((i % n) + n) % n)
+// pozicioni relativ i një slide-i: -1, 0, 1 ose 2
+const relOffset = (i: number, current: number, n: number) => {
+  const d = wrap(i - current, n)
+  return d > n - 2 ? d - n : d
+}
 
 export default function Page() {
   const [active, setActive] = useState('Të gjitha')
+  const [shown, setShown] = useState('Të gjitha')
+  const [leaving, setLeaving] = useState(false)
+  const [gridHeight, setGridHeight] = useState<number | undefined>(undefined)
+  const gridInnerRef = useRef<HTMLDivElement>(null)
+  const filterTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+
   const [menuOpen, setMenuOpen] = useState(false)
-  const [featuredIndex, setFeaturedIndex] = useState(0)
   const [selectedProject, setSelectedProject] = useState<typeof projects[number] | null>(null)
-  const [touchStart, setTouchStart] = useState<number | null>(null)
-  const featured = featuredProducts[featuredIndex]
-  const moveFeatured = (direction: number) => setFeaturedIndex((featuredIndex + direction + featuredProducts.length) % featuredProducts.length)
-  const visibleProjects = useMemo(() => active === 'Të gjitha' ? projects : projects.filter((project) => project.category === active), [active])
+
+  // ---- Galeria e hero me rrëshqitje që ndjek gishtin ----
+  const n = featuredProducts.length
+  const [pos, setPos] = useState({ i: 0, prev: 0 })
+  const [dragging, setDragging] = useState(false)
+  const heroRef = useRef<HTMLDivElement>(null)
+  const drag = useRef({ down: false, moving: false, id: -1, x0: 0, y0: 0, lastX: 0, lastT: 0, vx: 0 })
+  const featured = featuredProducts[pos.i]
+
+  const go = (dir: number) => setPos((p) => ({ i: wrap(p.i + dir, n), prev: p.i }))
+  const goTo = (k: number) => setPos((p) => ({ i: k, prev: p.i }))
+  const setDrag = (px: number) => heroRef.current?.style.setProperty('--drag', `${px}px`)
+
+  const onDown = (e: React.PointerEvent) => {
+    if (e.pointerType === 'mouse' && e.button !== 0) return
+    if ((e.target as HTMLElement).closest('button')) return
+    const d = drag.current
+    d.down = true; d.moving = false; d.id = e.pointerId
+    d.x0 = d.lastX = e.clientX; d.y0 = e.clientY; d.lastT = performance.now(); d.vx = 0
+  }
+  const onMove = (e: React.PointerEvent) => {
+    const d = drag.current
+    if (!d.down) return
+    const dx = e.clientX - d.x0
+    if (!d.moving) {
+      if (Math.abs(dx) < 6 || Math.abs(dx) < Math.abs(e.clientY - d.y0)) return
+      d.moving = true
+      setDragging(true)
+      try { heroRef.current?.setPointerCapture(d.id) } catch {}
+    }
+    const now = performance.now()
+    const dt = now - d.lastT
+    if (dt > 0) d.vx = 0.8 * d.vx + 0.2 * ((e.clientX - d.lastX) / dt)
+    d.lastX = e.clientX; d.lastT = now
+    setDrag(dx)
+  }
+  const onUp = (e: React.PointerEvent) => {
+    const d = drag.current
+    if (!d.down) return
+    d.down = false
+    if (!d.moving) return
+    d.moving = false
+    const dx = e.clientX - d.x0
+    const width = heroRef.current?.offsetWidth || 1
+    const far = Math.abs(dx) > width * 0.2
+    const fast = Math.abs(d.vx) > 0.45 && Math.abs(dx) > 12
+    setDrag(0)
+    setDragging(false)
+    if ((far || fast) && (dx < 0 ? d.vx <= 0.2 : d.vx >= -0.2)) go(dx < 0 ? 1 : -1)
+    else setPos((p) => ({ i: p.i, prev: p.i }))
+  }
+
+  // ---- Filtrimi i projekteve me animacion ----
+  const visibleProjects = useMemo(() => shown === 'Të gjitha' ? projects : projects.filter((project) => project.category === shown), [shown])
+
+  const changeFilter = (category: string, el: HTMLElement) => {
+    if (category === active) return
+    el.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' })
+    setActive(category)
+    if (gridInnerRef.current) setGridHeight(gridInnerRef.current.offsetHeight)
+    setLeaving(true)
+    clearTimeout(filterTimer.current)
+    filterTimer.current = setTimeout(() => {
+      setShown(category)
+      setLeaving(false)
+    }, 220)
+  }
+
+  useLayoutEffect(() => {
+    if (gridHeight === undefined || !gridInnerRef.current) return
+    const next = gridInnerRef.current.offsetHeight
+    setGridHeight(next)
+    const t = setTimeout(() => setGridHeight(undefined), 650)
+    return () => clearTimeout(t)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [shown])
+
+  // ---- Menuja dhe lightbox ----
+  const closeMenuAnd = (id: string) => (e: React.MouseEvent) => { setMenuOpen(false); scrollToId(id)(e) }
+
+  useEffect(() => {
+    if (!selectedProject) return
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && setSelectedProject(null)
+    document.addEventListener('keydown', onKey)
+    const prevOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    return () => { document.removeEventListener('keydown', onKey); document.body.style.overflow = prevOverflow }
+  }, [selectedProject])
 
   return (
     <main id="top">
       <div className="announcement">Punuar me kujdes në Prishtinë <span>·</span> Për shtëpi që zgjasin</div>
-      <header className="site-header"><Logo />
-
-      <button className="menu-toggle" onClick={() => setMenuOpen(!menuOpen)} aria-label="Hap menynë">{menuOpen ? 'Mbyll' : 'Menu'}</button>
-      
-      <nav className={menuOpen ? 'open' : ''}>
-      
-      <a href="#sherbimet" onClick={scrollToId('sherbimet')}>Shërbimet</a>
-      <a href="#projektet" onClick={scrollToId('procesi')}>Projektet</a>
-      <a href="#procesi" onClick={scrollToId('rreth-nesh')}>Rreth nesh</a>
-      <a className="nav-cta" onClick={scrollToId('kontakt')}>Kërko ofertë <span>↗</span></a>
-
+      <header className="site-header">
+        <Logo />
+        <button className="menu-toggle" onClick={() => setMenuOpen(!menuOpen)} aria-expanded={menuOpen} aria-label={menuOpen ? 'Mbyll menynë' : 'Hap menynë'}>{menuOpen ? 'Mbyll' : 'Menu'}</button>
+        <nav className={menuOpen ? 'open' : ''}>
+          <a href="#sherbimet" onClick={closeMenuAnd('sherbimet')}>Shërbimet</a>
+          <a href="#projektet" onClick={closeMenuAnd('projektet')}>Projektet</a>
+          <a href="#procesi" onClick={closeMenuAnd('procesi')}>Procesi</a>
+          <a href="#rreth-nesh" onClick={closeMenuAnd('rreth-nesh')}>Rreth nesh</a>
+          <a className="nav-cta" href="#kontakt" onClick={closeMenuAnd('kontakt')}>Kërko ofertë <span>↗</span></a>
         </nav>
       </header>
 
       <section className="hero">
-          <div className="hero-fade" aria-hidden="true"></div>
         <div className="hero-copy">
           <p className="eyebrow">MOBILERI E PUNUAR SIPAS JUSH</p>
           <h1>Hapësira të cilat<br /><em>ndihen</em> si tuajat.</h1>
           <p className="hero-text">Ne krijojmë mobilje të personalizuara që i japin karakter çdo dhome — nga ideja e parë deri te montimi i fundit.</p>
-      
-        <div className="hero-actions"><a className="button button-light" href="#projektet">Shiko projektet <span>↗</span></a>
-          <a className="text-link light-link" href="#rreth-nesh">Njihuni me Muranova <span>→</span></a>
-      
+          <div className="hero-actions">
+            <a className="button button-light" href="#projektet" onClick={scrollToId('projektet')}>Shiko projektet <span>↗</span></a>
+            <a className="text-link light-link" href="#rreth-nesh" onClick={scrollToId('rreth-nesh')}>Njihuni me Muranova <span>→</span></a>
+          </div>
         </div>
-      </div>
-      <div className="hero-image" onTouchStart={(event) => setTouchStart(event.touches[0].clientX)} onTouchEnd={(event) => { if (touchStart !== null && Math.abs(event.changedTouches[0].clientX - touchStart) > 45) moveFeatured(event.changedTouches[0].clientX < touchStart ? 1 : -1); setTouchStart(null) }}>
-      <img src={featured.image} alt={featured.title} />
-      <div className="hero-product"><span>{featured.label}</span><strong>{featured.title}</strong><div className="hero-dots" aria-label="Zgjidhni produktin kryesor">{featuredProducts.map((product, index) => <button key={product.label} className={featuredIndex === index ? 'active' : ''} onClick={() => setFeaturedIndex(index)} aria-label={`Shiko ${product.label}`} />)}</div></div>
-      <div className="hero-controls" aria-label="Navigimi i galerisë"><button type="button" onClick={() => moveFeatured(-1)} aria-label="Produkti i mëparshëm">←</button>
-      <button type="button" onClick={() => moveFeatured(1)} aria-label="Produkti i ardhshëm">→</button></div>
-      <div className="swipe-hint">← rrëshqit për të parë më shumë →</div></div>
+
+        <div
+          className={`hero-image${dragging ? ' is-dragging' : ''}`}
+          ref={heroRef}
+          onPointerDown={onDown}
+          onPointerMove={onMove}
+          onPointerUp={onUp}
+          onPointerCancel={onUp}
+        >
+          {featuredProducts.map((product, i) => {
+            const offset = relOffset(i, pos.i, n)
+            const prevOffset = relOffset(i, pos.prev, n)
+            const animate = Math.abs(offset) <= 1 && Math.abs(prevOffset) <= 1
+            const visible = Math.abs(offset) <= 1
+            return (
+              <div
+                className="hero-slide"
+                key={product.label}
+                aria-hidden={i !== pos.i}
+                style={{
+                  transform: `translate3d(calc(${offset * 100}% + var(--drag, 0px)), 0, 0)`,
+                  transition: dragging || !animate ? 'none' : undefined,
+                  visibility: visible ? 'visible' : 'hidden',
+                }}
+              >
+                <img src={product.image} alt={product.title} draggable={false} />
+              </div>
+            )
+          })}
+          <div className="hero-fade-right" aria-hidden="true" />
+          <div className="hero-product" key={featured.label}>
+            <span>{featured.label}</span>
+            <strong>{featured.title}</strong>
+            <div className="hero-dots" aria-label="Zgjidhni produktin kryesor">
+              {featuredProducts.map((product, index) => <button key={product.label} className={pos.i === index ? 'active' : ''} onClick={() => goTo(index)} aria-label={`Shiko ${product.label}`} />)}
+            </div>
+          </div>
+          <div className="hero-controls" aria-label="Navigimi i galerisë">
+            <button type="button" onClick={() => go(-1)} aria-label="Produkti i mëparshëm">←</button>
+            <button type="button" onClick={() => go(1)} aria-label="Produkti i ardhshëm">→</button>
+          </div>
+          <div className="swipe-hint">← rrëshqit për të parë më shumë →</div>
+        </div>
       </section>
 
-      <section className="intro section-pad"><div className="section-kicker">MURANOVA / 01</div><div className="intro-content"><h2>Druri është materiali.<br /><em>Ju jeni historia.</em></h2><div><p className="lead">Çdo hapësirë ka ritmin e vet. Ne e dëgjojmë, e kuptojmë dhe e kthejmë në mobilje të ndërtuara për jetën tuaj.</p><a className="text-link" href="#rreth-nesh">Më shumë rreth nesh <span>→</span></a></div></div></section>
+      <section className="intro section-pad"><div className="section-kicker">MURANOVA / 01</div><div className="intro-content"><h2>Druri është materiali.<br /><em>Ju jeni historia.</em></h2><div><p className="lead">Çdo hapësirë ka ritmin e vet. Ne e dëgjojmë, e kuptojmë dhe e kthejmë në mobilje të ndërtuara për jetën tuaj.</p><a className="text-link" href="#rreth-nesh" onClick={scrollToId('rreth-nesh')}>Më shumë rreth nesh <span>→</span></a></div></div></section>
 
-      <section className="services section-pad" id="sherbimet"><div className="workshop-tools" aria-hidden="true"><span className="tool tool-nail">⌁</span><span className="tool tool-hammer">⌕</span><span className="tool tool-saw">⌇</span></div><div className="section-heading"><div><div className="section-kicker">ÇFARË BËJMË</div><h2>Forma që i japin<br /><em>jetë funksionit.</em></h2></div><p>Që nga një kuzhinë e vogël deri te interieret e plota, e bëjmë çdo centimetër të vlejë.</p></div><div className="service-grid">{[['01','Kuzhina','Ritualet e përditshme meritojnë një hapësirë të menduar mirë.'],['02','Garderoba','Ruajtje e mençur, linja të pastra dhe gjithçka në vendin e vet.'],['03','TV & living','Komoditet, ngrohtësi dhe një pikë fokale për shtëpinë.'],['04','Dhoma gjumi','Qetësi e projektuar për pushimin që ju nevojitet.'],['05','Zyra & kontrata','Zgjidhje të qëndrueshme për hapësira pune me identitet.']].map(([number,title,text]) => <article className="service-card" key={title}><span>{number}</span><h3>{title}</h3><p>{text}</p><a href="#kontakt" aria-label={`Mëso më shumë për ${title}`}>↗</a></article>)}</div></section>
+      <section className="services section-pad" id="sherbimet"><div className="workshop-tools" aria-hidden="true"><span className="tool tool-nail">⌁</span><span className="tool tool-hammer">⌕</span><span className="tool tool-saw">⌇</span></div><div className="section-heading"><div><div className="section-kicker">ÇFARË BËJMË</div><h2>Forma që i japin<br /><em>jetë funksionit.</em></h2></div><p>Që nga një kuzhinë e vogël deri te interieret e plota, e bëjmë çdo centimetër të vlejë.</p></div><div className="service-grid">{[['01','Kuzhina','Ritualet e përditshme meritojnë një hapësirë të menduar mirë.'],['02','Garderoba','Ruajtje e mençur, linja të pastra dhe gjithçka në vendin e vet.'],['03','TV & living','Komoditet, ngrohtësi dhe një pikë fokale për shtëpinë.'],['04','Dhoma gjumi','Qetësi e projektuar për pushimin që ju nevojitet.'],['05','Zyra & kontrata','Zgjidhje të qëndrueshme për hapësira pune me identitet.']].map(([number,title,text]) => <article className="service-card" key={title}><span>{number}</span><h3>{title}</h3><p>{text}</p><a href="#kontakt" onClick={scrollToId('kontakt')} aria-label={`Mëso më shumë për ${title}`}>↗</a></article>)}</div></section>
 
       <section className="projects section-pad" id="projektet">
-        
-      <div className="section-heading project-heading"><div>
-      <div className="section-kicker">PUNËT TONA</div>
-      <h2>Disa nga hapësirat<br />
-      <em>që kemi krijuar.</em></h2></div>
-      <p className="project-desc-text">Nga ideja fillestare te realizimi final — shfletoni disa nga hapësirat tona të preferuara të shndërruara në jetë.</p>   
-      </div>
-      <div className="filters">{categories.map((category) => <button className={active === category ? 'active' : ''} key={category} onClick={() => setActive(category)}>{category}</button>)}</div>
-      <div className="project-grid">
-  {visibleProjects.map((project, index) => (
-    <article
-      className={`project-card card-${index % 3}`}
-      key={project.title}
-      onClick={() => setSelectedProject(project)}
-      style={{ cursor: 'pointer' }}
-    >
-      <div className="project-image">
-        <img src={project.image} alt={project.title} />
-      </div>
-      <div className="project-meta">
-        <div><span>{project.category}</span><h3>{project.title}</h3></div>
-        <p>{project.location}</p>
-      </div>
-    </article>
-  ))}
-</div><div className="center-link"><a className="button button-dark" href="#kontakt">Shiko të gjitha projektet <span>↗</span></a></div></section>
+        <div className="section-heading project-heading">
+          <div>
+            <div className="section-kicker">PUNËT TONA</div>
+            <h2>Disa nga hapësirat<br /><em>që kemi krijuar.</em></h2>
+          </div>
+          <p className="project-desc-text">Nga ideja fillestare te realizimi final — shfletoni disa nga hapësirat tona të preferuara të shndërruara në jetë.</p>
+        </div>
+        <div className="filters" role="tablist" aria-label="Filtro projektet">
+          {categories.map((category) => (
+            <button
+              role="tab"
+              aria-selected={active === category}
+              className={active === category ? 'active' : ''}
+              key={category}
+              onClick={(e) => changeFilter(category, e.currentTarget)}
+            >{category}</button>
+          ))}
+        </div>
+        <div className="project-grid-wrap" style={gridHeight !== undefined ? { height: gridHeight } : undefined}>
+          <div className={`project-grid${leaving ? ' is-leaving' : ''}`} key={shown} ref={gridInnerRef}>
+            {visibleProjects.map((project, index) => (
+              <article
+                className="project-card"
+                key={project.title}
+                style={{ ['--i' as string]: Math.min(index, 9) }}
+                onClick={() => setSelectedProject(project)}
+              >
+                <div className="project-image">
+                  <img src={project.image} alt={project.title} loading="lazy" decoding="async" />
+                </div>
+                <div className="project-meta">
+                  <div><span>{project.category}</span><h3>{project.title}</h3></div>
+                  <p>{project.location}</p>
+                </div>
+              </article>
+            ))}
+          </div>
+        </div>
+        <div className="center-link"><a className="button button-dark" href="#kontakt" onClick={scrollToId('kontakt')}>Shiko të gjitha projektet <span>↗</span></a></div>
+      </section>
 
       <section className="statement"><div className="statement-inner"><span className="section-kicker">BESIMI YNË</span><h2>Gjërat e mira<br /><em>duan kohë.</em></h2><p>Materiale të zgjedhura. Punë e përpiktë. Një rezultat që plaket bukur dhe qëndron gjatë.</p></div></section>
 
       <section className="process section-pad" id="procesi"><div className="section-heading"><div><div className="section-kicker">SI PUNOJMË</div><h2>Një proces i qartë.<br /><em>Një rezultat i juaji.</em></h2></div></div><div className="process-grid">{[['01','Dëgjojmë','Fillojmë me ju: dëshirat, nevojat dhe mënyrën si jetoni.'],['02','Projektojmë','Kthejmë idetë në vizatim dhe materialet në një plan konkret.'],['03','Ndërtojmë','Punojmë me durim në punishte, duke kontrolluar çdo detaj.'],['04','Vendosim','Sjellim gjithçka në shtëpinë tuaj dhe e lëmë gati për jetën.']].map(([number,title,text]) => <div className="process-item" key={number}><span>{number}</span><h3>{title}</h3><p>{text}</p></div>)}</div></section>
 
-      <section className="about section-pad" id="rreth-nesh"><div className="about-image"><img src="https://images.unsplash.com/photo-1564078516393-cf04bd966897?auto=format&fit=crop&w=1200&q=85" alt="Detaj i një interieri të punuar me dru" /></div><div className="about-copy"><div className="section-kicker">RRETH MURANOVA</div><h2>Ne besojmë se<br /><em>cilësia duket.</em></h2><p>Muranova është një punishte mobilieri me pasion për materialin, proporcioni dhe punën e bërë mirë. Bashkojmë zanatin tradicional me dizajnin bashkëkohor për të krijuar pjesë që ju shërbejnë çdo ditë.</p><a className="text-link" href="#kontakt">Na njihni më mirë <span>→</span></a></div></section>
+      <section className="about section-pad" id="rreth-nesh"><div className="about-image"><img src="https://images.unsplash.com/photo-1564078516393-cf04bd966897?auto=format&fit=crop&w=1200&q=85" alt="Detaj i një interieri të punuar me dru" loading="lazy" /></div><div className="about-copy"><div className="section-kicker">RRETH MURANOVA</div><h2>Ne besojmë se<br /><em>cilësia duket.</em></h2><p>Muranova është një punishte mobilieri me pasion për materialin, proporcioni dhe punën e bërë mirë. Bashkojmë zanatin tradicional me dizajnin bashkëkohor për të krijuar pjesë që ju shërbejnë çdo ditë.</p><a className="text-link" href="#kontakt" onClick={scrollToId('kontakt')}>Na njihni më mirë <span>→</span></a></div></section>
 
-      <section className="contact" id="kontakt"><div><div className="section-kicker">LE TË FLASIM</div><h2>Keni një hapësirë<br /><em>në mendje?</em></h2></div><div className="contact-side"><p>Na tregoni çfarë po imagjinoni. Ne do ta kthejmë në diçka të prekshme.</p><a className="button button-light" href="mailto:info@muranova.com">Kërko ofertë <span>↗</span></a></div></section>
+      <section className="contact" id="kontakt">
+        <div className="contact-main">
+          <div className="section-kicker">LE TË FLASIM</div>
+          <h2>Keni një hapësirë<br /><em>në mendje?</em></h2>
+          <p className="contact-intro">Na tregoni çfarë po imagjinoni. Ne do ta kthejmë në diçka të prekshme.</p>
+          <div className="contact-actions">
+            <a className="button button-light" href={CONTACT.phoneHref}>Thirr {CONTACT.phoneDisplay} <span>↗</span></a>
+            <a className="button button-outline" href={`mailto:${CONTACT.email}`}>Dërgo email <span>↗</span></a>
+          </div>
+        </div>
+        <div className="contact-details">
+          <div className="contact-item">
+            <h3>Telefon</h3>
+            <a href={CONTACT.phoneHref}>{CONTACT.phoneDisplay}</a>
+          </div>
+          <div className="contact-item">
+            <h3>Email</h3>
+            <a href={`mailto:${CONTACT.email}`}>{CONTACT.email}</a>
+          </div>
+          <div className="contact-item">
+            <h3>{CONTACT.office.name}</h3>
+            <p>{CONTACT.office.address}</p>
+            <a className="map-link" href={CONTACT.office.mapUrl} target="_blank" rel="noopener noreferrer">Hap në hartë ↗</a>
+          </div>
+          <div className="contact-item">
+            <h3>{CONTACT.workshop.name}</h3>
+            <p>{CONTACT.workshop.address}</p>
+            <p className="contact-note">Këtu mund ta shihni nga afër punën e kryer.</p>
+            <a className="map-link" href={CONTACT.workshop.mapUrl} target="_blank" rel="noopener noreferrer">Hap në hartë ↗</a>
+          </div>
+        </div>
+      </section>
 
-      
-      <footer><div className="footer-logo-blush">
-    <Logo />
-  </div>
-  
-  <div className="footer-nav">
-    <a href="#sherbimet">Shërbimet</a>
-    <a href="#projektet">Projektet</a><a href="#procesi">Procesi</a>
-    <a href="#rreth-nesh">Rreth nesh</a>
-  </div>
-  <div className="footer-contact">
-    <a href="tel:+38344123456">+383 44 123 456</a><a href="mailto:info@muranova.com">info@muranova.com</a>
-  <span>Prishtinë, Kosovë</span>
-  </div>
-  <div className="footer-bottom">
-  <span>© 2026 Muranova Woodworks. Të gjitha të drejtat e rezervuara.</span>
-  <span>Instagram&nbsp;&nbsp; Facebook</span>
-  </div>
-  
-  </footer>
+      <footer>
+        <div className="footer-logo-blush"><Logo /></div>
+        <div className="footer-nav">
+          <a href="#sherbimet" onClick={scrollToId('sherbimet')}>Shërbimet</a>
+          <a href="#projektet" onClick={scrollToId('projektet')}>Projektet</a>
+          <a href="#procesi" onClick={scrollToId('procesi')}>Procesi</a>
+          <a href="#rreth-nesh" onClick={scrollToId('rreth-nesh')}>Rreth nesh</a>
+        </div>
+        <div className="footer-contact">
+          <a href={CONTACT.phoneHref}>{CONTACT.phoneDisplay}</a>
+          <a href={`mailto:${CONTACT.email}`}>{CONTACT.email}</a>
+          <a href={CONTACT.office.mapUrl} target="_blank" rel="noopener noreferrer">Zyra: {CONTACT.office.address}</a>
+          <a href={CONTACT.workshop.mapUrl} target="_blank" rel="noopener noreferrer">Punishtja: {CONTACT.workshop.address}</a>
+        </div>
+        <div className="footer-bottom">
+          <span>© 2026 Muranova Woodworks. Të gjitha të drejtat e rezervuara.</span>
+          <span><a href="https://www.instagram.com/muranovagroup/" target="_blank">Instagram</a>&nbsp;&nbsp; <a href="https://www.facebook.com/profile.php?id=61594988946904" target="_blank">Facebook</a> </span>
+        </div>
+      </footer>
 
-  {selectedProject && (
-  <div className="lightbox-overlay" onClick={() => setSelectedProject(null)}>
-    <button className="lightbox-close" onClick={() => setSelectedProject(null)} aria-label="Mbyll">✕</button>
-    <div className="lightbox-content" onClick={(e) => e.stopPropagation()}>
-      <img src={selectedProject.image} alt={selectedProject.title} />
-      <div className="lightbox-info">
-        <span>{selectedProject.category}</span>
-        <h3>{selectedProject.title}</h3>
-        <p>{categoryDescriptions[selectedProject.category]}</p>
-      </div>
-    </div>
-  </div>
-)}
+      {selectedProject && (
+        <div className="lightbox-overlay" onClick={() => setSelectedProject(null)}>
+          <button className="lightbox-close" onClick={() => setSelectedProject(null)} aria-label="Mbyll">✕</button>
+          <div className="lightbox-content" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
+            <img src={selectedProject.image} alt={selectedProject.title} />
+            <div className="lightbox-info">
+              <span>{selectedProject.category}</span>
+              <h3>{selectedProject.title}</h3>
+              <p>{categoryDescriptions[selectedProject.category]}</p>
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   )
 }
